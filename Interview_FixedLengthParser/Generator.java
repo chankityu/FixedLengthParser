@@ -1,128 +1,153 @@
 import java.io.*;
 import java.util.*;
 
+import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.context.Context;
+import org.thymeleaf.templateresolver.StringTemplateResolver;
+
 public class Generator {
 
     private static final String SCHEMA_PATH = "Interview_FixedLengthParser/schema.txt";
 
+    private static TemplateEngine getTemplateEngine() {
+        StringTemplateResolver resolver = new StringTemplateResolver();
+        resolver.setTemplateMode("TEXT");
+        resolver.setCacheable(false);
+
+        TemplateEngine engine = new TemplateEngine();
+        engine.setTemplateResolver(resolver);
+        return engine;
+    }
+
     public static String fixedLengthParserGenerator() {
-        StringBuilder sb = new StringBuilder();
-
         try {
-            List<Triple> columns = getSchema();
+            List<Triple> columns = getSchema(SCHEMA_PATH);
 
-            appendImports(sb);
-            sb.append("public class FixedLengthParser {\n\n");
+            Context context = new Context();
+            context.setVariable("columns", columns);
+            context.setVariable("maxEnd",
+                    columns.stream().mapToInt(c -> c.end).max().orElse(0));
 
-            appendSchemaConstants(sb, columns);
-            appendParseMethod(sb, columns);
-            appendExtractMethod(sb);
-            appendMainMethod(sb);
-
-            sb.append("}\n");
+            return getTemplateEngine().process(getParserTemplate(), context);
 
         } catch (Exception e) {
             throw new RuntimeException("Error generating parser", e);
         }
-
-        return sb.toString();
     }
 
-    private static void appendImports(StringBuilder sb) {
-        sb.append("""
-                import java.io.BufferedReader;
-                import java.io.FileReader;
-                import java.io.IOException;
-                import java.util.ArrayList;
-                import java.util.List;
+    public static String recordGenerator() {
+        try {
+            List<Triple> columns = getSchema(SCHEMA_PATH);
 
-                """);
+            Context context = new Context();
+            context.setVariable("columns", columns);
+
+            return getTemplateEngine().process(getRecordTemplate(), context);
+
+        } catch (Exception e) {
+            throw new RuntimeException("Error generating Record class", e);
+        }
     }
 
-    private static void appendSchemaConstants(StringBuilder sb, List<Triple> columns) {
-        sb.append("    // Schema configuration\n");
+    // ================= TEMPLATE: PARSER =================
+    private static String getParserTemplate() {
+        return """
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 
-        for (Triple col : columns) {
-            String name = col.name.toUpperCase();
-            sb.append(String.format("    private static final int %s_START = %d;%n", name, col.start));
-            sb.append(String.format("    private static final int %s_END = %d;%n", name, col.end));
-        }
-        sb.append("\n");
-    }
+public class FixedLengthParser {
 
-    private static void appendParseMethod(StringBuilder sb, List<Triple> columns) {
-        int maxEnd = columns.stream().mapToInt(c -> c.end).max().orElse(0);
+    // Schema configuration
+[# th:each="col : ${columns}"]
+    private static final int [[${#strings.toUpperCase(col.name)}]]_START = [[${col.start}]];
+    private static final int [[${#strings.toUpperCase(col.name)}]]_END = [[${col.end}]];
+[/]
 
-        sb.append("""
-                public List<Record> parseFile(String filePath) throws IOException {
-                    List<Record> records = new ArrayList<>();
+    public List<Record> parseFile(String filePath) throws IOException {
+        List<Record> records = new ArrayList<>();
 
-                    try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
-                        String line;
+        try (BufferedReader reader = new BufferedReader(new FileReader(filePath))) {
+            String line;
 
-                        while ((line = reader.readLine()) != null) {
-                """);
+            while ((line = reader.readLine()) != null) {
 
-        sb.append(String.format("""
-                            if (line.length() < %d) {
-                                continue;
-                            }
-
-                """, maxEnd));
-
-        // Generate field extraction dynamically
-        for (Triple col : columns) {
-            sb.append(String.format(
-                    "            String %s = extractField(line, %s_START, %s_END).trim();%n",
-                    col.name, col.name.toUpperCase(), col.name.toUpperCase()
-            ));
-        }
-
-        // Constructor
-        sb.append("\n            Record record = new Record(");
-        for (Iterator<Triple> it = columns.iterator(); it.hasNext(); ) {
-            sb.append(it.next().name);
-            if (it.hasNext()) sb.append(", ");
-        }
-        sb.append(");\n");
-
-        sb.append("""
-                            records.add(record);
-                        }
-                    }
-                    return records;
+                if (line.length() < [[${maxEnd}]]) {
+                    continue;
                 }
 
-                """);
+[# th:each="col : ${columns}"]
+                String [[${col.name}]] = extractField(line, [[${#strings.toUpperCase(col.name)}]]_START, [[${#strings.toUpperCase(col.name)}]]_END).trim();
+[/]
+
+                Record record = new Record(
+[# th:each="col, iter : ${columns}"]
+                    [[${col.name}]][(${iter.last}? '' : ', ')]
+[/]
+                );
+
+                records.add(record);
+            }
+        }
+        return records;
     }
 
-    private static void appendExtractMethod(StringBuilder sb) {
-        sb.append("""
-                private String extractField(String line, int start, int end) {
-                    return line.substring(start - 1, Math.min(end, line.length()));
-                }
-
-                """);
+    private String extractField(String line, int start, int end) {
+        return line.substring(start - 1, Math.min(end, line.length()));
     }
 
-    private static void appendMainMethod(StringBuilder sb) {
-        sb.append("""
-                public static void main(String[] args) {
-                    FixedLengthParser parser = new FixedLengthParser();
-                    try {
-                        List<Record> records = parser.parseFile("path/to/file.txt");
-                        records.forEach(System.out::println);
-                    } catch (IOException e) {
-                        e.printStackTrace();
-                    }
-                }
-                """);
+    public static void main(String[] args) {
+        FixedLengthParser parser = new FixedLengthParser();
+        try {
+            List<Record> records = parser.parseFile("path/to/file.txt");
+            records.forEach(System.out::println);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+}
+""";
     }
 
-    public static List<Triple> getSchema() throws IOException {
+    // ================= TEMPLATE: RECORD =================
+    private static String getRecordTemplate() {
+        return """
+public class Record {
+
+[# th:each="col : ${columns}"]
+    private String [[${col.name}]];
+[/]
+
+    public Record(
+[# th:each="col, iter : ${columns}"]
+        String [[${col.name}]][(${iter.last}? '' : ',')]
+[/]
+    ) {
+[# th:each="col : ${columns}"]
+        this.[[${col.name}]] = [[${col.name}]];
+[/]
+    }
+
+    @Override
+    public String toString() {
+        return "Record{" +
+[# th:each="col, iter : ${columns}"]
+            "[[${col.name}]]='" + [[${col.name}]] + '\\'' +
+            [(${iter.last}? '' : '", " +')]
+[/]
+            '}';
+    }
+}
+""";
+    }
+
+    // ================= SCHEMA =================
+    public static List<Triple> getSchema(String path) throws IOException {
         List<Triple> list = new ArrayList<>();
 
-        try (BufferedReader br = new BufferedReader(new FileReader(SCHEMA_PATH))) {
+        try (BufferedReader br = new BufferedReader(new FileReader(path))) {
             String line;
 
             while ((line = br.readLine()) != null) {
@@ -138,65 +163,10 @@ public class Generator {
                         Integer.parseInt(parts[2])
                 ));
             }
+        } catch (NumberFormatException e) {
+            throw new IllegalArgumentException("Invalid schema line");
         }
 
         return list;
-    }
-
-    public static String recordGenerator() {
-        StringBuilder sb = new StringBuilder();
-
-        try {
-            List<Triple> columns = getSchema();
-
-            sb.append("public class Record {\n\n");
-
-            // Fields
-            for (Triple col : columns) {
-                sb.append("    private String ").append(col.name).append(";\n");
-            }
-
-            // Constructor
-            sb.append("\n    public Record(");
-            for (Iterator<Triple> it = columns.iterator(); it.hasNext(); ) {
-                Triple col = it.next();
-                sb.append("String ").append(col.name);
-                if (it.hasNext()) sb.append(", ");
-            }
-            sb.append(") {\n");
-
-            for (Triple col : columns) {
-                sb.append(String.format("        this.%s = %s;%n", col.name, col.name));
-            }
-            sb.append("    }\n");
-
-            // toString
-            sb.append("""
-                    
-                    @Override
-                    public String toString() {
-                        return "Record{"
-                    """);
-
-            for (Iterator<Triple> it = columns.iterator(); it.hasNext(); ) {
-                Triple col = it.next();
-                sb.append(String.format(" + \"%s='\" + %s + '\\''", col.name, col.name));
-                if (it.hasNext()) sb.append(" + \",\"");
-            }
-
-            sb.append(" + '}';\n    }\n");
-
-            sb.append("}\n");
-
-        } catch (IOException e) {
-            throw new RuntimeException("Error generating Record class", e);
-        }
-
-        return sb.toString();
-    }
-
-    public static void main(String[] args) {
-//        System.out.println(fixedLengthParserGenerator());
-         System.out.println(recordGenerator());
     }
 }

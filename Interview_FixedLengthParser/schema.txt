@@ -1,3 +1,0 @@
-name 1 20
-gender 20 21
-age 22 25
