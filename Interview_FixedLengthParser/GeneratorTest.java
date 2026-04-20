@@ -59,7 +59,7 @@ class GeneratorTest {
 
     @Test
     void testFixedLengthParserGenerator_containsExpectedSections() {
-        String result = Generator.fixedLengthParserGenerator();
+        String result = Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH);
 
         assertTrue(result.contains("class FixedLengthParser"));
         assertTrue(result.contains("parseFile"));
@@ -69,7 +69,7 @@ class GeneratorTest {
 
     @Test
     void testFixedLengthParserGenerator_containsSchemaConstants() {
-        String result = Generator.fixedLengthParserGenerator();
+        String result = Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH);
 
         assertTrue(result.contains("NAME_START"));
         assertTrue(result.contains("AGE_START"));
@@ -106,7 +106,7 @@ class GeneratorTest {
         Files.writeString(Paths.get(TEST_SCHEMA_PATH), "bad data");
 
         RuntimeException ex = assertThrows(RuntimeException.class,
-                Generator::fixedLengthParserGenerator);
+                ()->Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH));
 
         assertTrue(ex.getMessage().contains("Error generating parser"));
     }

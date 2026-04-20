@@ -19,9 +19,9 @@ public class Generator {
         return engine;
     }
 
-    public static String fixedLengthParserGenerator() {
+    public static String fixedLengthParserGenerator(String path) {
         try {
-            List<Triple> columns = getSchema(SCHEMA_PATH);
+            List<Triple> columns = getSchema(path);
 
             Context context = new Context();
             context.setVariable("columns", columns);
@@ -143,30 +143,39 @@ public class Record {
 """;
     }
 
-    // ================= SCHEMA =================
-    public static List<Triple> getSchema(String path) throws IOException {
+    public static List<String> readSchemaLines(String path) throws IOException {
+        try (BufferedReader br = new BufferedReader(new FileReader(path))) {
+            return br.lines().toList();
+        }
+    }
+
+    public static List<Triple> parseSchema(List<String> lines) {
         List<Triple> list = new ArrayList<>();
 
-        try (BufferedReader br = new BufferedReader(new FileReader(path))) {
-            String line;
+        for (String line : lines) {
+            String[] parts = line.trim().split("\\s+");
 
-            while ((line = br.readLine()) != null) {
-                String[] parts = line.trim().split("\\s+");
+            if (parts.length != 3) {
+                throw new IllegalArgumentException("Invalid schema line: " + line);
+            }
 
-                if (parts.length != 3) {
-                    throw new IllegalArgumentException("Invalid schema line: " + line);
-                }
-
+            try {
                 list.add(new Triple(
                         parts[0],
                         Integer.parseInt(parts[1]),
                         Integer.parseInt(parts[2])
                 ));
+            } catch (NumberFormatException e) {
+                throw new IllegalArgumentException("Invalid schema line: " + line);
             }
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid schema line");
         }
 
         return list;
+    }
+
+    // ================= SCHEMA =================
+    public static List<Triple> getSchema(String path) throws IOException {
+        List<String> lines = readSchemaLines(path);
+        return parseSchema(lines);
     }
 }
