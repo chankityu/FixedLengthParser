@@ -1,13 +1,23 @@
+
 import org.junit.jupiter.api.*;
-import java.io.*;
+import org.thymeleaf.TemplateEngine;
+import org.thymeleaf.templateresolver.StringTemplateResolver;
+
+import javax.tools.JavaCompiler;
+import javax.tools.ToolProvider;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.nio.file.*;
-import java.util.*;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
 class GeneratorTest {
 
     private static final String TEST_SCHEMA_PATH = "Interview_FixedLengthParser/schema.txt";
+
+    private Generator generator;
 
     @BeforeEach
     void setup() throws IOException {
@@ -20,6 +30,16 @@ class GeneratorTest {
                 """;
 
         Files.writeString(Paths.get(TEST_SCHEMA_PATH), schema);
+
+        // Setup template engine
+        StringTemplateResolver resolver = new StringTemplateResolver();
+        resolver.setTemplateMode("TEXT");
+        resolver.setCacheable(false);
+
+        TemplateEngine engine = new TemplateEngine();
+        engine.setTemplateResolver(resolver);
+
+        generator = new Generator(engine);
     }
 
     @AfterEach
@@ -33,18 +53,20 @@ class GeneratorTest {
 
         assertEquals(3, schema.size());
 
-        assertEquals("name", schema.get(0).name);
-        assertEquals(1, schema.get(0).start);
-        assertEquals(10, schema.get(0).end);
+        assertEquals("name", schema.get(0).getName());
+        assertEquals(1, schema.get(0).getStart());
+        assertEquals(10, schema.get(0).getEnd());
     }
 
     @Test
     void testGetSchema_invalidSchemaLine() throws IOException {
-        String invalidSchema = "invalid line here";
-        Files.writeString(Paths.get(TEST_SCHEMA_PATH), invalidSchema);
+        Files.writeString(Paths.get(TEST_SCHEMA_PATH), "invalid line");
 
-        Exception ex = assertThrows(IllegalArgumentException.class, () -> Generator.getSchema(TEST_SCHEMA_PATH));
-        System.out.println(ex.getMessage());
+        Exception ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> Generator.getSchema(TEST_SCHEMA_PATH)
+        );
+
         assertTrue(ex.getMessage().contains("Invalid schema line"));
     }
 
@@ -58,18 +80,21 @@ class GeneratorTest {
     }
 
     @Test
-    void testFixedLengthParserGenerator_containsExpectedSections() {
-        String result = Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH);
+    void testGenerateParser_containsExpectedSections() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String result = generator.generateParser(schema);
 
         assertTrue(result.contains("class FixedLengthParser"));
         assertTrue(result.contains("parseFile"));
         assertTrue(result.contains("extractField"));
-        assertTrue(result.contains("main"));
     }
 
     @Test
-    void testFixedLengthParserGenerator_containsSchemaConstants() {
-        String result = Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH);
+    void testGenerateParser_containsSchemaConstants() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String result = generator.generateParser(schema);
 
         assertTrue(result.contains("NAME_START"));
         assertTrue(result.contains("AGE_START"));
@@ -77,8 +102,11 @@ class GeneratorTest {
     }
 
     @Test
-    void testRecordGenerator_containsFields() {
-        String result = Generator.recordGenerator();
+    void testGenerateRecord_containsFields() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String result = generator.generateRecord(schema);
+        System.out.println(result);
 
         assertTrue(result.contains("private String name"));
         assertTrue(result.contains("private String age"));
@@ -86,39 +114,106 @@ class GeneratorTest {
     }
 
     @Test
-    void testRecordGenerator_containsConstructor() {
-        String result = Generator.recordGenerator();
+    void testGeneratedRecordCodeShouldCompile() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String recordCode = generator.generateRecord(schema);
+        System.out.println(recordCode);
+        // Create temp directory
+        File tempDir = Files.createTempDirectory("gen-test").toFile();
+
+        //File parserFile = new File(tempDir, "FixedLengthParser.java");
+        File recordFile = new File(tempDir, "Record.java");
+
+        //writeToFile(parserFile, parserCode);
+        writeToFile(recordFile, recordCode);
+
+        //System.out.println(parserCode);
+
+        // Compile
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "Compiler not available. Are you using JDK?");
+
+        int result = compiler.run(
+                null,
+                null,
+                null,
+                //parserFile.getPath(),
+                recordFile.getPath()
+        );
+
+        // Assert
+        assertEquals(0, result, "Generated code failed to compile");
+    }
+
+    @Test
+    void testGeneratedParserCodeShouldCompile() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String parserCode = generator.generateParser(schema);
+        System.out.println(parserCode);
+        // Create temp directory
+        File tempDir = Files.createTempDirectory("gen-test").toFile();
+
+        File parserFile = new File(tempDir, "FixedLengthParser.java");
+
+        //writeToFile(parserFile, parserCode);
+        writeToFile(parserFile, parserCode);
+
+        //System.out.println(parserCode);
+
+        // Compile
+        JavaCompiler compiler = ToolProvider.getSystemJavaCompiler();
+        assertNotNull(compiler, "Compiler not available. Are you using JDK?");
+
+        int result = compiler.run(
+                null,
+                null,
+                null,
+                parserFile.getPath()
+        );
+
+        // Assert
+        assertEquals(0, result, "Generated code failed to compile");
+    }
+
+    private void writeToFile(File file, String content) throws Exception {
+        try (FileWriter writer = new FileWriter(file)) {
+            writer.write(content);
+        }
+    }
+
+
+    @Test
+    void testGenerateRecord_containsConstructor() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String result = generator.generateRecord(schema);
 
         assertTrue(result.contains("public Record("));
         assertTrue(result.contains("this.name = name"));
     }
 
     @Test
-    void testRecordGenerator_containsToString() {
-        String result = Generator.recordGenerator();
+    void testGenerateRecord_containsToString() throws Exception {
+        List<Triple> schema = Generator.getSchema(TEST_SCHEMA_PATH);
+
+        String result = generator.generateRecord(schema);
 
         assertTrue(result.contains("toString"));
         assertTrue(result.contains("Record{"));
     }
 
     @Test
-    void testFixedLengthParserGenerator_handlesSchemaException() throws IOException {
+    void testGenerateParser_handlesSchemaException() throws IOException {
         Files.writeString(Paths.get(TEST_SCHEMA_PATH), "bad data");
 
-        RuntimeException ex = assertThrows(RuntimeException.class,
-                ()->Generator.fixedLengthParserGenerator(TEST_SCHEMA_PATH));
+        Exception ex = assertThrows(
+                IllegalArgumentException.class,
+                () -> Generator.getSchema(TEST_SCHEMA_PATH)
+        );
 
-        assertTrue(ex.getMessage().contains("Error generating parser"));
-    }
-
-    @Test
-    void testRecordGenerator_handlesSchemaException() throws IOException {
-        Files.writeString(Paths.get(TEST_SCHEMA_PATH), "bad data");
-
-        RuntimeException ex = assertThrows(RuntimeException.class,
-                Generator::recordGenerator);
-        System.out.println(ex.getMessage());
-
-        assertTrue(ex.getMessage().contains("Error generating Record class"));
+        assertTrue(ex.getMessage().contains("Invalid schema line"));
     }
 }
+
